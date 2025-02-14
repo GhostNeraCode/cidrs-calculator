@@ -94,21 +94,62 @@ class IP:
         return self.ip_int == other.ip_int
 
 class Network:
+    @staticmethod
+    def count_leading_zeros(num: int, bits: int = 32) -> int:
+        """
+        Имплементация на CLZ (Count Leading Zeros)
+        Връща броя на водещите нули в двоичното представяне на число
+        """
+        if num == 0:
+            return bits
+        
+        count = 0
+        mask = 1 << (bits - 1)
+        
+        while mask > 0 and not (num & mask):
+            count += 1
+            mask >>= 1
+            
+        return count
+
+    @staticmethod
+    def find_optimal_prefix(start: int, end: int, bits: int = 32) -> int:
+        """
+        Намира оптималния префикс използвайки CLZ
+        """
+        if start == end:
+            return bits
+            
+        diff = start ^ end  # XOR за намиране на различаващите се битове
+        return bits - (bits - Network.count_leading_zeros(diff, bits))
+
     def __init__(self, network_str: str):
         """Инициализира мрежа от CIDR нотация"""
-        if '/' not in network_str:
-            raise ValueError("Липсва префикс в CIDR нотацията")
-        
-        ip_str, prefix_str = network_str.split('/')
-        self.ip = IP(ip_str)
-        self.prefix_length = int(prefix_str)
-        
-        max_prefix = 32 if self.ip.version == 4 else 128
-        if not (0 <= self.prefix_length <= max_prefix):
-            raise ValueError("Невалидна дължина на префикса")
-        
-        # Изчисляване на мрежова маска и адреси
-        self._calculate_network_values()
+        try:
+            # Проверка за валиден CIDR формат
+            if '/' not in network_str:
+                raise ValueError("Моля, въведете IP адрес с префикс (пример: 192.168.1.0/24 или 2001:db8::/32)")
+            
+            ip_str, prefix_str = network_str.split('/')
+            
+            # Валидация на префикса
+            if not prefix_str.isdigit():
+                raise ValueError("Префиксът трябва да бъде число")
+            
+            self.ip = IP(ip_str)
+            self.prefix_length = int(prefix_str)
+            
+            # Проверка за валиден диапазон на префикса
+            max_prefix = 32 if self.ip.version == 4 else 128
+            if not (0 <= self.prefix_length <= max_prefix):
+                raise ValueError(f"Префиксът трябва да бъде между 0 и {max_prefix}")
+            
+            # Изчисляване на мрежова маска и адреси
+            self._calculate_network_values()
+        except ValueError as e:
+            raise ValueError(str(e))
+        except Exception as e:
+            raise ValueError(f"Невалиден CIDR формат. Моля, използвайте формат IP/префикс (пример: 192.168.1.0/24)")
 
     def _calculate_network_values(self):
         """Изчислява мрежова маска, мрежов и broadcast адреси"""
@@ -152,7 +193,7 @@ class Network:
         return 1 << (32 if self.ip.version == 4 else 128) - self.prefix_length
 
 def find_optimal_cidrs(start_ip_str: str, end_ip_str: str) -> List[str]:
-    """Намира оптималните CIDR блокове между два IP адреса"""
+    """Намира оптималните CIDR блокове между два IP адреса използвайки CLZ"""
     try:
         start_ip = IP(start_ip_str)
         end_ip = IP(end_ip_str)
@@ -166,25 +207,33 @@ def find_optimal_cidrs(start_ip_str: str, end_ip_str: str) -> List[str]:
         result = []
         current_ip = start_ip.ip_int
         end_ip_int = end_ip.ip_int
-        max_prefix = 32 if start_ip.version == 4 else 128
+        bits = 32 if start_ip.version == 4 else 128
 
         while current_ip <= end_ip_int:
-            prefix = max_prefix
-            for p in range(max_prefix, -1, -1):
-                mask = ((1 << max_prefix) - 1) ^ ((1 << (max_prefix - p)) - 1)
-                network_start = current_ip & mask
-                network_end = network_start | ((1 << (max_prefix - p)) - 1)
-                
-                if network_start == current_ip and network_end <= end_ip_int:
-                    prefix = p
+            # Използваме CLZ за намиране на оптималния префикс
+            prefix = Network.find_optimal_prefix(current_ip, end_ip_int, bits)
+            
+            # Намираме маската за текущия префикс
+            mask = ((1 << bits) - 1) ^ ((1 << (bits - prefix)) - 1)
+            
+            # Намираме началото на мрежата
+            network_start = current_ip & mask
+            
+            # Проверяваме дали мрежата започва от текущия IP
+            while network_start < current_ip:
+                prefix += 1
+                if prefix > bits:
                     break
+                mask = ((1 << bits) - 1) ^ ((1 << (bits - prefix)) - 1)
+                network_start = current_ip & mask
 
             if start_ip.version == 4:
                 result.append(f"{IP._int_to_ipv4_str(current_ip)}/{prefix}")
-                current_ip = (current_ip & ((1 << max_prefix) - (1 << (max_prefix - prefix)))) + (1 << (max_prefix - prefix))
             else:
                 result.append(f"{IP._int_to_ipv6_str(current_ip)}/{prefix}")
-                current_ip = (current_ip & ((1 << max_prefix) - (1 << (max_prefix - prefix)))) + (1 << (max_prefix - prefix))
+
+            # Преминаваме към следващия блок
+            current_ip = (current_ip & ((1 << bits) - (1 << (bits - prefix)))) + (1 << (bits - prefix))
 
         return result
     except ValueError as e:
@@ -203,6 +252,15 @@ def print_banner():
 def analyze_network(cidr: str) -> Dict[str, Union[str, int]]:
     """Анализира CIDR нотация и връща информация за мрежата"""
     try:
+        # Базова валидация на входа
+        cidr = cidr.strip()
+        if not cidr:
+            return {"error": "Моля, въведете CIDR нотация"}
+        
+        # Проверка за правилен формат
+        if '/' not in cidr:
+            return {"error": "Моля, въведете IP адрес с префикс (пример: 192.168.1.0/24 или 2001:db8::/32)"}
+        
         network = Network(cidr)
         info = {
             "IP версия": "IPv6" if network.ip.version == 6 else "IPv4",
@@ -223,6 +281,8 @@ def analyze_network(cidr: str) -> Dict[str, Union[str, int]]:
         return info
     except ValueError as e:
         return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"Възникна грешка: {str(e)}"}
 
 def main():
     print_banner()
