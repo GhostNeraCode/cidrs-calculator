@@ -2,6 +2,18 @@
 import ipaddress
 from typing import List
 
+def print_banner():
+    """
+    Отпечатва красиво банер със заглавието на програмата
+    """
+    print("\033[95m") # Лилав цвят
+    print("╔══════════════════════════════════════════════╗")
+    print("║             CIDR КАЛКУЛАТОР                  ║")
+    print("║                                              ║")
+    print("║              Made by Ivansky                 ║")
+    print("╚══════════════════════════════════════════════╝")
+    print("\033[0m")  # Връщане към нормален цвят
+
 def analyze_network(cidr_notation):
     """
     Анализира CIDR нотация и връща информация за мрежата
@@ -56,18 +68,20 @@ def calculate_optimal_cidrs(start_ip: str, end_ip: str) -> List[str]:
         return [f"Грешка: {str(e)}"]
 
 def main():
-    print("CIDR Калкулатор (IPv4 и IPv6)")
+    print_banner()
     print("-" * 50)
     
     while True:
         print("\nИзберете режим:")
-        print("1. Анализ на CIDR нотация")
-        print("2. Намиране на оптимални CIDR блокове между два IP адреса")
-        print("3. Изход")
+        print("\033[94m1.\033[0m Анализ на CIDR нотация")
+        print("\033[94m2.\033[0m Намиране на оптимални CIDR блокове между два IP адреса")
+        print("\033[94m3.\033[0m Изход")
         
         choice = input("\nВашият избор (1-3): ")
         
         if choice == "3":
+            print("\n\033[95mБлагодаря, че използвахте CIDR калкулатора!")
+            print("Made by Ivansky\033[0m")
             break
             
         if choice == "1":
@@ -78,13 +92,13 @@ def main():
             result = analyze_network(cidr)
             
             if "Грешка" in result:
-                print(f"\nГрешка: {result['Грешка']}")
+                print(f"\n\033[91mГрешка: {result['Грешка']}\033[0m")
                 continue
                 
-            print("\nРезултати:")
+            print("\n\033[92mРезултати:\033[0m")
             print("-" * 20)
             for key, value in result.items():
-                print(f"{key}: {value}")
+                print(f"\033[96m{key}:\033[0m {value}")
                 
         elif choice == "2":
             start_ip = input("\nВъведете начален IP адрес: ")
@@ -92,13 +106,13 @@ def main():
             
             cidrs = calculate_optimal_cidrs(start_ip, end_ip)
             
-            print("\nОптимални CIDR блокове:")
+            print("\n\033[92mОптимални CIDR блокове:\033[0m")
             print("-" * 20)
             if cidrs and cidrs[0].startswith("Грешка"):
-                print(cidrs[0])
+                print(f"\033[91m{cidrs[0]}\033[0m")
             else:
                 for i, cidr in enumerate(cidrs, 1):
-                    print(f"{i}. {cidr}")
+                    print(f"\033[96m{i}. {cidr}\033[0m")
                     result = analyze_network(cidr)
                     if "Грешка" not in result:
                         print(f"   Брой адреси: {result['Брой адреси']}")
@@ -106,7 +120,7 @@ def main():
                         print(f"   End IP: {result['End IP']}")
                         print()
         else:
-            print("\nНевалиден избор. Моля, изберете 1, 2 или 3.")
+            print("\n\033[91mНевалиден избор. Моля, изберете 1, 2 или 3.\033[0m")
 
 if __name__ == "__main__":
     main() 
