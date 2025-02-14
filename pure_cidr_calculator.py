@@ -118,19 +118,30 @@ def find_optimal_cidrs(start_ip_str: str, end_ip_str: str) -> List[str]:
             start_ip, end_ip = end_ip, start_ip
 
         result = []
-        while start_ip <= end_ip:
-            max_prefix = 32
-            for prefix in range(32, -1, -1):
-                network = Network(f"{str(start_ip)}/{prefix}")
-                broadcast_ip = IP(network.get_broadcast_address())
-                if broadcast_ip <= end_ip:
-                    max_prefix = prefix
+        current_ip = start_ip.ip_int
+        end_ip_int = end_ip.ip_int
+
+        while current_ip <= end_ip_int:
+            # Намираме най-големия възможен префикс
+            diff = end_ip_int - current_ip + 1
+            prefix = 32
+            size = 1
+
+            # Намираме най-големия блок, който се побира
+            while size < diff and prefix > 0:
+                if (current_ip & ((1 << (33 - prefix)) - 1)) == 0:
+                    next_size = 1 << (32 - (prefix - 1))
+                    if current_ip + next_size - 1 <= end_ip_int:
+                        size = next_size
+                        prefix -= 1
+                    else:
+                        break
+                else:
                     break
 
-            network = Network(f"{str(start_ip)}/{max_prefix}")
-            result.append(f"{str(start_ip)}/{max_prefix}")
-            broadcast_ip = IP(network.get_broadcast_address())
-            start_ip = IP(Network._int_to_ip_str(broadcast_ip.ip_int + 1))
+            # Добавяме намерения блок
+            result.append(f"{Network._int_to_ip_str(current_ip)}/{prefix}")
+            current_ip += size
 
         return result
     except ValueError as e:
