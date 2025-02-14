@@ -1,45 +1,88 @@
 #!/usr/bin/env python3
 from typing import List, Dict, Union, Tuple
+import re
 
 class IP:
     def __init__(self, ip_str: str):
         """Инициализира IP адрес от стринг"""
-        self.octets = self._parse_ip(ip_str)
-        self.version = 4 if len(self.octets) == 4 else 6
-        self.ip_int = self._to_integer()
+        self.original_str = ip_str
+        self.version = 6 if ':' in ip_str else 4
+        self.ip_int = self._to_integer(ip_str)
 
-    def _parse_ip(self, ip_str: str) -> List[int]:
-        """Парсва IP адрес от стринг във формат с октети"""
-        if '.' in ip_str:  # IPv4
-            parts = ip_str.split('.')
-            if len(parts) != 4:
-                raise ValueError("Невалиден IPv4 адрес")
-            return [self._validate_octet(int(p)) for p in parts]
-        else:  # IPv6
-            raise ValueError("IPv6 все още не се поддържа")
-
-    def _validate_octet(self, octet: int) -> int:
-        """Проверява дали октетът е валиден (0-255)"""
-        if not (0 <= octet <= 255):
-            raise ValueError(f"Невалидна стойност за октет: {octet}")
-        return octet
-
-    def _to_integer(self) -> int:
-        """Конвертира IP адреса в цяло число"""
+    def _to_integer(self, ip_str: str) -> int:
+        """Конвертира IP адрес в цяло число"""
         if self.version == 4:
-            result = 0
-            for octet in self.octets:
-                result = (result << 8) + octet
-            return result
-        return 0  # За IPv6
+            return self._ipv4_to_int(ip_str)
+        return self._ipv6_to_int(ip_str)
+
+    def _ipv4_to_int(self, ip_str: str) -> int:
+        """Конвертира IPv4 адрес в цяло число"""
+        parts = ip_str.split('.')
+        if len(parts) != 4:
+            raise ValueError("Невалиден IPv4 адрес")
+        
+        result = 0
+        for part in parts:
+            octet = int(part)
+            if not (0 <= octet <= 255):
+                raise ValueError(f"Невалидна стойност за октет: {octet}")
+            result = (result << 8) + octet
+        return result
+
+    def _ipv6_to_int(self, ip_str: str) -> int:
+        """Конвертира IPv6 адрес в цяло число"""
+        # Разширяване на съкратен IPv6 адрес
+        if '::' in ip_str:
+            missing_count = 8 - ip_str.count(':') + 1
+            ip_str = ip_str.replace('::', ':' + ':0' * missing_count + ':')
+            if ip_str.startswith(':'):
+                ip_str = '0' + ip_str
+            if ip_str.endswith(':'):
+                ip_str = ip_str + '0'
+
+        parts = ip_str.split(':')
+        if len(parts) != 8:
+            raise ValueError("Невалиден IPv6 адрес")
+
+        result = 0
+        for part in parts:
+            if not part:
+                raise ValueError("Невалиден IPv6 адрес")
+            hex_val = int(part, 16)
+            if not (0 <= hex_val <= 0xFFFF):
+                raise ValueError(f"Невалидна стойност за IPv6 част: {part}")
+            result = (result << 16) + hex_val
+        return result
 
     def to_binary(self) -> str:
         """Връща IP адреса в двоичен формат"""
-        return format(self.ip_int, '032b') if self.version == 4 else format(self.ip_int, '0128b')
+        if self.version == 4:
+            return format(self.ip_int, '032b')
+        return format(self.ip_int, '0128b')
 
     def __str__(self) -> str:
         """Връща IP адреса като стринг"""
-        return '.'.join(map(str, self.octets)) if self.version == 4 else ''
+        if self.version == 4:
+            return self._int_to_ipv4_str(self.ip_int)
+        return self._int_to_ipv6_str(self.ip_int)
+
+    @staticmethod
+    def _int_to_ipv4_str(ip_int: int) -> str:
+        """Конвертира цяло число в IPv4 стринг"""
+        octets = []
+        for _ in range(4):
+            octets.insert(0, str(ip_int & 255))
+            ip_int >>= 8
+        return '.'.join(octets)
+
+    @staticmethod
+    def _int_to_ipv6_str(ip_int: int) -> str:
+        """Конвертира цяло число в IPv6 стринг"""
+        parts = []
+        for _ in range(8):
+            parts.insert(0, format(ip_int & 0xFFFF, '04x'))
+            ip_int >>= 16
+        return ':'.join(parts)
 
     def __lt__(self, other) -> bool:
         return self.ip_int < other.ip_int
@@ -60,50 +103,53 @@ class Network:
         self.ip = IP(ip_str)
         self.prefix_length = int(prefix_str)
         
-        if not (0 <= self.prefix_length <= 32):
+        max_prefix = 32 if self.ip.version == 4 else 128
+        if not (0 <= self.prefix_length <= max_prefix):
             raise ValueError("Невалидна дължина на префикса")
         
-        # Изчисляване на мрежова маска
-        self.netmask_int = ((1 << 32) - 1) ^ ((1 << (32 - self.prefix_length)) - 1)
-        
-        # Изчисляване на мрежов адрес
+        # Изчисляване на мрежова маска и адреси
+        self._calculate_network_values()
+
+    def _calculate_network_values(self):
+        """Изчислява мрежова маска, мрежов и broadcast адреси"""
+        bits = 32 if self.ip.version == 4 else 128
+        self.netmask_int = ((1 << bits) - 1) ^ ((1 << (bits - self.prefix_length)) - 1)
         self.network_address_int = self.ip.ip_int & self.netmask_int
-        
-        # Изчисляване на broadcast адрес
-        self.broadcast_address_int = self.network_address_int | ((1 << (32 - self.prefix_length)) - 1)
+        self.broadcast_address_int = self.network_address_int | ((1 << (bits - self.prefix_length)) - 1)
 
     def get_network_address(self) -> str:
-        """Връща мрежовия адрес като стринг"""
-        return self._int_to_ip_str(self.network_address_int)
+        """Връща мрежовия адрес"""
+        if self.ip.version == 4:
+            return IP._int_to_ipv4_str(self.network_address_int)
+        return IP._int_to_ipv6_str(self.network_address_int)
 
     def get_broadcast_address(self) -> str:
-        """Връща broadcast адреса като стринг"""
-        return self._int_to_ip_str(self.broadcast_address_int)
+        """Връща broadcast адреса"""
+        if self.ip.version == 4:
+            return IP._int_to_ipv4_str(self.broadcast_address_int)
+        return IP._int_to_ipv6_str(self.broadcast_address_int)
 
     def get_netmask(self) -> str:
-        """Връща мрежовата маска като стринг"""
-        return self._int_to_ip_str(self.netmask_int)
+        """Връща мрежовата маска"""
+        if self.ip.version == 4:
+            return IP._int_to_ipv4_str(self.netmask_int)
+        return IP._int_to_ipv6_str(self.netmask_int)
 
     def get_first_usable(self) -> str:
         """Връща първия използваем IP адрес"""
-        return self._int_to_ip_str(self.network_address_int + 1)
+        if self.ip.version == 4:
+            return IP._int_to_ipv4_str(self.network_address_int + 1)
+        return IP._int_to_ipv6_str(self.network_address_int + 1)
 
     def get_last_usable(self) -> str:
         """Връща последния използваем IP адрес"""
-        return self._int_to_ip_str(self.broadcast_address_int - 1)
+        if self.ip.version == 4:
+            return IP._int_to_ipv4_str(self.broadcast_address_int - 1)
+        return IP._int_to_ipv6_str(self.broadcast_address_int - 1)
 
     def get_num_addresses(self) -> int:
         """Връща броя на адресите в мрежата"""
-        return 1 << (32 - self.prefix_length)
-
-    @staticmethod
-    def _int_to_ip_str(ip_int: int) -> str:
-        """Конвертира IP адрес от цяло число в стринг"""
-        octets = []
-        for _ in range(4):
-            octets.insert(0, str(ip_int & 255))
-            ip_int >>= 8
-        return '.'.join(octets)
+        return 1 << (32 if self.ip.version == 4 else 128) - self.prefix_length
 
 def find_optimal_cidrs(start_ip_str: str, end_ip_str: str) -> List[str]:
     """Намира оптималните CIDR блокове между два IP адреса"""
@@ -120,28 +166,25 @@ def find_optimal_cidrs(start_ip_str: str, end_ip_str: str) -> List[str]:
         result = []
         current_ip = start_ip.ip_int
         end_ip_int = end_ip.ip_int
+        max_prefix = 32 if start_ip.version == 4 else 128
 
         while current_ip <= end_ip_int:
-            # Намираме най-големия възможен префикс
-            diff = end_ip_int - current_ip + 1
-            prefix = 32
-            size = 1
-
-            # Намираме най-големия блок, който се побира
-            while size < diff and prefix > 0:
-                if (current_ip & ((1 << (33 - prefix)) - 1)) == 0:
-                    next_size = 1 << (32 - (prefix - 1))
-                    if current_ip + next_size - 1 <= end_ip_int:
-                        size = next_size
-                        prefix -= 1
-                    else:
-                        break
-                else:
+            prefix = max_prefix
+            for p in range(max_prefix, -1, -1):
+                mask = ((1 << max_prefix) - 1) ^ ((1 << (max_prefix - p)) - 1)
+                network_start = current_ip & mask
+                network_end = network_start | ((1 << (max_prefix - p)) - 1)
+                
+                if network_start == current_ip and network_end <= end_ip_int:
+                    prefix = p
                     break
 
-            # Добавяме намерения блок
-            result.append(f"{Network._int_to_ip_str(current_ip)}/{prefix}")
-            current_ip += size
+            if start_ip.version == 4:
+                result.append(f"{IP._int_to_ipv4_str(current_ip)}/{prefix}")
+                current_ip = (current_ip & ((1 << max_prefix) - (1 << (max_prefix - prefix)))) + (1 << (max_prefix - prefix))
+            else:
+                result.append(f"{IP._int_to_ipv6_str(current_ip)}/{prefix}")
+                current_ip = (current_ip & ((1 << max_prefix) - (1 << (max_prefix - prefix)))) + (1 << (max_prefix - prefix))
 
         return result
     except ValueError as e:
@@ -152,7 +195,7 @@ def print_banner():
     print("\033[95m")  # Лилав цвят
     print("╔═════════════════════════════════════════════════╗")
     print("║             PURE CIDR КАЛКУЛАТОР               ║")
-    print("║            Без Външни Библиотеки              ║")
+    print("║        IPv4 и IPv6 - Максимална Скорост        ║")
     print("║               Made by Ivansky                  ║")
     print("╚═════════════════════════════════════════════════╝")
     print("\033[0m")
@@ -161,16 +204,23 @@ def analyze_network(cidr: str) -> Dict[str, Union[str, int]]:
     """Анализира CIDR нотация и връща информация за мрежата"""
     try:
         network = Network(cidr)
-        return {
+        info = {
+            "IP версия": "IPv6" if network.ip.version == 6 else "IPv4",
             "Мрежов адрес": network.get_network_address(),
             "Broadcast адрес": network.get_broadcast_address(),
             "Мрежова маска": network.get_netmask(),
             "Префикс": network.prefix_length,
             "Брой адреси": network.get_num_addresses(),
             "Първи използваем": network.get_first_usable(),
-            "Последен използваем": network.get_last_usable(),
-            "Маска (двоично)": format(network.netmask_int, '032b')
+            "Последен използваем": network.get_last_usable()
         }
+        
+        if network.ip.version == 4:
+            info["Маска (двоично)"] = format(network.netmask_int, '032b')
+        else:
+            info["Маска (двоично)"] = format(network.netmask_int, '0128b')
+            
+        return info
     except ValueError as e:
         return {"error": str(e)}
 
@@ -179,7 +229,7 @@ def main():
 
     while True:
         print("\n\033[94mИзберете опция:\033[0m")
-        print("1. Анализ на CIDR нотация")
+        print("1. Анализ на CIDR нотация (IPv4 или IPv6)")
         print("2. Намиране на оптимални CIDR блокове")
         print("3. Изход")
 
@@ -190,7 +240,7 @@ def main():
             break
 
         elif choice == "1":
-            cidr = input("\nВъведете CIDR нотация (пр. 192.168.1.0/24): ").strip()
+            cidr = input("\nВъведете CIDR нотация (пр. 192.168.1.0/24 или 2001:db8::/32): ").strip()
             info = analyze_network(cidr)
             
             if "error" in info:
